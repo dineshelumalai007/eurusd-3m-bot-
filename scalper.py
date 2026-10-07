@@ -74,7 +74,7 @@ def close_all_positions():
     for pos in positions:
         close_single_position(pos.ticket, pos.volume, pos.type)
     tracked_positions.clear()
-    print("/ Opposite trend trigger: Running trades ellaam close aayiduchu.")
+    print("/ Trend reversal trigger: Running trades ellaam close aayiduchu.")
 
 
 def place_order(direction):
@@ -177,12 +177,15 @@ def manage_running_trades():
 
 def check_candle_pattern():
     global last_processed_candle_time
-    rates = mt5.copy_rates_from_pos(SYMBOL, TIMEFRAME, 0, 4)
-    if rates is None or len(rates) < 3:
+    
+    # 3 mudivu petra candles + 1 ippo form aagura candle
+    rates = mt5.copy_rates_from_pos(SYMBOL, TIMEFRAME, 0, 5)
+    if rates is None or len(rates) < 4:
         return
 
-    c1 = rates[-3]
-    c2 = rates[-2]
+    c1 = rates[-4]        # 1st candle
+    c2 = rates[-3]        # 2nd candle
+    c_latest = rates[-2]  # Breakout candle (ipo thaan mudinjudhu)
     current_candle_time = rates[-1]['time']
 
     if current_candle_time == last_processed_candle_time:
@@ -191,25 +194,51 @@ def check_candle_pattern():
 
     c1_color = "GREEN" if c1['close'] > c1['open'] else "RED"
     c2_color = "GREEN" if c2['close'] > c2['open'] else "RED"
+    latest_color = "GREEN" if c_latest['close'] > c_latest['open'] else "RED"
 
-    print(f"[{time.strftime('%H:%M:%S')}] New M3 Candle Started | Last 2 Closed: [1: {c1_color}, 2: {c2_color}]")
+    # Candle body boundaries (Wick illamal pure Body level)
+    c1_body_low = min(c1['open'], c1['close'])
+    c1_body_high = max(c1['open'], c1['close'])
+
+    print(f"[{time.strftime('%H:%M:%S')}] New Candle Started | Last 3: [c1: {c1_color}, c2: {c2_color}, break_candle: {latest_color}]")
 
     positions = get_bot_positions()
     running_direction = None
     if positions:
         running_direction = "BUY" if positions[0].type == mt5.POSITION_TYPE_BUY else "SELL"
 
-    if c1_color == "GREEN" and c2_color == "GREEN":
+    # --- IMAGE PATTERN: 1st Candle Body Breakout Logic ---
+    
+    # SELL Setup: 2 Green candles-க்கு அப்புறம், அடுத்த Red candle முதல் Green candle-ன் Body Low-க்கு கீழே Close வைத்தால்:
+    if c1_color == "GREEN" and c2_color == "GREEN" and latest_color == "RED":
+        if c_latest['close'] < c1_body_low:
+            print("Image Logic Triggered: Red Candle closed below First Green Candle Body Low!")
+            if running_direction == "BUY":
+                close_all_positions()
+            place_order("SELL")
+            return
+
+    # BUY Setup: 2 Red candles-க்கு அப்புறம், அடுத்த Green candle முதல் Red candle-ன் Body High-க்கு மேலே Close வைத்தால்:
+    if c1_color == "RED" and c2_color == "RED" and latest_color == "GREEN":
+        if c_latest['close'] > c1_body_high:
+            print("Image Logic Triggered: Green Candle closed above First Red Candle Body High!")
+            if running_direction == "SELL":
+                close_all_positions()
+            place_order("BUY")
+            return
+
+    # --- STANDARD 2-CANDLE CONTINUATION / ENTRY LOGIC ---
+    if c2_color == "GREEN" and latest_color == "GREEN":
         if running_direction == "SELL":
-            print("Reversal: 2 Green Candles against SELL.")
+            print("Standard Reversal: 2 Green Candles against SELL.")
             close_all_positions()
             place_order("BUY")
         elif running_direction is None:
             place_order("BUY")
 
-    elif c1_color == "RED" and c2_color == "RED":
+    elif c2_color == "RED" and latest_color == "RED":
         if running_direction == "BUY":
-            print("Reversal: 2 Red Candles against BUY.")
+            print("Standard Reversal: 2 Red Candles against BUY.")
             close_all_positions()
             place_order("SELL")
         elif running_direction is None:
